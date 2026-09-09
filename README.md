@@ -32,6 +32,9 @@ Drag inside the frame to move the line. Double-tap flips its orientation.
 
 ## Run
 
+Web build: https://berlogabob.github.io/MotionDraw/ (tap once to start audio,
+allow the camera).
+
 ```
 flutter pub get
 flutter run -d macos    # or ios / android

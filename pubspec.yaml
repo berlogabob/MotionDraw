@@ -12,6 +12,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_soloud: ^4.1.7
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

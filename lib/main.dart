@@ -1,19 +1,24 @@
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'canvas_screen.dart';
 import 'feeds.dart';
 import 'sampler.dart';
 import 'scale_mapper.dart';
+import 'web_feed_stub.dart' if (dart.library.js_interop) 'web_feed.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final sampler = Sampler();
-  await sampler.init();
+  // Browsers refuse audio before a user gesture: init after the first tap.
+  if (!kIsWeb) await sampler.init();
   CameraFeed? feed;
-  if (Platform.isMacOS) {
+  if (kIsWeb) {
+    feed = WebCameraFeed();
+  } else if (Platform.isMacOS) {
     feed = MacCameraFeed();
   } else {
     try {
@@ -32,8 +37,37 @@ void main() async {
     ),
     home: feed == null
         ? TapTestScreen(sampler: sampler)
-        : CanvasScreen(sampler: sampler, feed: feed),
+        : kIsWeb
+            ? StartGate(sampler: sampler, feed: feed)
+            : CanvasScreen(sampler: sampler, feed: feed),
   ));
+}
+
+/// Web only: one tap to unlock the browser's audio context, then the canvas.
+class StartGate extends StatelessWidget {
+  const StartGate({super.key, required this.sampler, required this.feed});
+  final Sampler sampler;
+  final CameraFeed feed;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () async {
+          await sampler.init();
+          if (!context.mounted) return;
+          Navigator.of(context).pushReplacement(MaterialPageRoute(
+              builder: (_) => CanvasScreen(sampler: sampler, feed: feed)));
+        },
+        child: const Scaffold(
+          body: Center(
+            child: Text(
+              'TAP TO START',
+              style: TextStyle(
+                  fontSize: 11, letterSpacing: 1.5, color: Colors.black),
+            ),
+          ),
+        ),
+      );
 }
 
 /// Milestone 1 test mode: tap anywhere — vertical position picks the note.
