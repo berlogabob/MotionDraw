@@ -8,8 +8,12 @@ class WebCameraFeed implements CameraFeed {
   @override
   int get rotationDegrees => 0;
   @override
-  bool get mirrored => false;
+  bool get mirrorDefault => true;
   @override
-  Widget buildPreview(void Function(Frame) onFrame) =>
+  List<String> get cameras => const [];
+  @override
+  int index = 0;
+  @override
+  Widget host(void Function(Frame) onFrame) =>
       throw UnsupportedError('web only');
 }

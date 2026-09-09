@@ -1,17 +1,52 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:motiondraw/camera_strip.dart';
 
 void main() {
-  test('coverCrop: 4:3 image into a wide box crops height only', () {
-    final c = coverCrop(640, 480, 1490, 935);
-    expect(c.fx, closeTo(1, 1e-9));
-    expect(c.ox, closeTo(0, 1e-9));
-    expect(c.fy, closeTo(935 / (480 * 1490 / 640), 1e-9));
-    expect(c.oy, closeTo((1 - c.fy) / 2, 1e-9));
+  // 3 wide × 2 high:
+  //  1 2 3
+  //  4 5 6
+  final f = Frame(
+      bytes: Uint8List.fromList([1, 2, 3, 4, 5, 6]),
+      width: 3,
+      height: 2,
+      stride: 3);
+
+  test('orient rotation 0 is identity', () {
+    final g = orient(f);
+    expect((g.width, g.height), (3, 2));
+    expect(g.bytes, [1, 2, 3, 4, 5, 6]);
   });
 
-  test('coverCrop: same aspect shows everything', () {
-    final c = coverCrop(4, 3, 8, 6);
-    expect((c.ox, c.fx, c.oy, c.fy), (0.0, 1.0, 0.0, 1.0));
+  test('orient 90° clockwise', () {
+    final g = orient(f, rotation: 90);
+    expect((g.width, g.height), (2, 3));
+    expect(g.bytes, [4, 1, 5, 2, 6, 3]);
+  });
+
+  test('orient 270° clockwise', () {
+    expect(orient(f, rotation: 270).bytes, [3, 6, 2, 5, 1, 4]);
+  });
+
+  test('orient flips', () {
+    expect(orient(f, flipH: true).bytes, [3, 2, 1, 6, 5, 4]);
+    expect(orient(f, flipV: true).bytes, [4, 5, 6, 1, 2, 3]);
+    expect(orient(f, rotation: 180).bytes, [6, 5, 4, 3, 2, 1]);
+  });
+
+  test('stripOf averages the band and crops the run', () {
+    final g = Gray(Uint8List.fromList([10, 20, 30, 40, 50, 60, 70, 80, 90]), 3, 3);
+    // vertical line at column 1, band 2 → columns 0 and 1
+    expect(stripOf(g, vertical: true, at: 1, band: 2), [15, 45, 75]);
+    expect(stripOf(g, vertical: true, at: 1, band: 2, start: 1, length: 1),
+        [45]);
+    // horizontal line at row 2, band 1
+    expect(stripOf(g, vertical: false, at: 2, band: 1), [70, 80, 90]);
+  });
+
+  test('rgbaOf lifts grey and sets alpha', () {
+    final px = rgbaOf(Gray(Uint8List.fromList([0, 255]), 2, 1));
+    expect(px, [145, 145, 145, 255, 255, 255, 255, 255]);
   });
 }

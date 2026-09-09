@@ -22,8 +22,8 @@ void main() async {
     feed = MacCameraFeed();
   } else {
     try {
-      final camera = (await availableCameras()).firstOrNull;
-      if (camera != null) feed = MobileCameraFeed(camera);
+      final cameras = await availableCameras();
+      if (cameras.isNotEmpty) feed = MobileCameraFeed(cameras);
     } catch (_) {
       // No camera available → tap test mode.
     }
@@ -81,12 +81,12 @@ class TapTestScreen extends StatefulWidget {
 }
 
 class _TapTestScreenState extends State<TapTestScreen> {
-  final _flash = List<double>.filled(bins, 0);
+  final _flash = List<double>.filled(cellsAcross, 0);
 
   void _tap(TapDownDetails d, Size size) {
     // Low notes at the bottom.
     final bin =
-        ((1 - d.localPosition.dy / size.height) * bins).floor().clamp(0, bins - 1);
+        ((1 - d.localPosition.dy / size.height) * cellsAcross).floor().clamp(0, cellsAcross - 1);
     widget.sampler.playNote(binToMidi(bin), 0.8);
     setState(() => _flash[bin] = 1);
     Future.delayed(const Duration(milliseconds: 250), () {
@@ -122,8 +122,8 @@ class _LinePainter extends CustomPainter {
       ..strokeWidth = 1;
     final x = size.width / 2;
     canvas.drawLine(Offset(x, 0), Offset(x, size.height), line);
-    final binH = size.height / bins;
-    for (var i = 0; i < bins; i++) {
+    final binH = size.height / cellsAcross;
+    for (var i = 0; i < cellsAcross; i++) {
       final y = size.height - (i + 0.5) * binH;
       canvas.drawLine(Offset(x - 4, y), Offset(x + 4, y), line);
       if (flash[i] > 0) {

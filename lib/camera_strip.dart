@@ -2,8 +2,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 /// One camera frame's pixel data, platform-agnostic. [pixelStride] and
-/// [channelOffset] pick the luminance byte: Y plane = (1, 0); ARGB = (4, 2)
-/// (green channel — good enough as a luminance proxy for motion diffing).
+/// [channelOffset] pick the luminance byte: Y plane = (1, 0); RGBA/BGRA =
+/// (4, 1 or 2) (green channel — good enough as a luminance proxy).
 class Frame {
   const Frame({
     required this.bytes,
@@ -21,85 +21,89 @@ class Frame {
   final int channelOffset;
 }
 
-/// Where the detection line lives in *image* coordinates, plus whether the
-/// strip must be reversed to match on-screen direction.
-class ImageLine {
-  const ImageLine(this.vertical, this.pos, this.reversed);
-  final bool vertical;
-  final double pos; // 0..1 across the perpendicular axis
-  final bool reversed;
-
-  /// Account for a mirrored preview (front cameras, macOS default): flip
-  /// across the image's vertical axis.
-  ImageLine mirroredX() => vertical
-      ? ImageLine(true, 1 - pos, reversed)
-      : ImageLine(false, pos, !reversed);
+/// Screen-oriented 8-bit luminance. The single source of truth: it is both
+/// drawn on screen and analysed, so picture and detection cannot disagree.
+class Gray {
+  const Gray(this.bytes, this.width, this.height);
+  final Uint8List bytes;
+  final int width;
+  final int height;
 }
 
-/// Camera frames arrive in sensor orientation; the preview is rotated by
-/// [rotationDegrees] (quarter turns, clockwise) to reach screen space. Map the
-/// screen-space line back into image space.
-ImageLine screenToImageLine({
-  required bool screenVertical,
-  required double screenPos,
-  required int rotationDegrees,
+/// Rotate a sensor frame [rotation] degrees clockwise (0/90/180/270), then
+/// mirror horizontally ([flipH]) / vertically ([flipV]) into a [Gray].
+Gray orient(Frame f, {int rotation = 0, bool flipH = false, bool flipV = false}) {
+  final quarter = ((rotation % 360) ~/ 90) & 3;
+  final swap = quarter.isOdd;
+  final w = swap ? f.height : f.width;
+  final h = swap ? f.width : f.height;
+  final out = Uint8List(w * h);
+  final src = f.bytes;
+  for (var y = 0; y < h; y++) {
+    final oy = flipV ? h - 1 - y : y;
+    final row = y * w;
+    for (var x = 0; x < w; x++) {
+      final ox = flipH ? w - 1 - x : x;
+      final int sx, sy;
+      switch (quarter) {
+        case 1:
+          sx = oy;
+          sy = f.height - 1 - ox;
+        case 2:
+          sx = f.width - 1 - ox;
+          sy = f.height - 1 - oy;
+        case 3:
+          sx = f.width - 1 - oy;
+          sy = ox;
+        default:
+          sx = ox;
+          sy = oy;
+      }
+      out[row + x] = src[sy * f.stride + sx * f.pixelStride + f.channelOffset];
+    }
+  }
+  return Gray(out, w, h);
+}
+
+/// Band-averaged 1-D strip along a line. [vertical] line at column [at]
+/// (else row [at]); [band] pixels thick; only indices [start, start+length)
+/// along the line are returned, so strip index maps 1:1 onto bins.
+Uint8List stripOf(
+  Gray g, {
+  required bool vertical,
+  required int at,
+  int band = 10,
+  int start = 0,
+  int? length,
 }) {
-  switch (rotationDegrees % 360) {
-    case 90:
-      return screenVertical
-          ? ImageLine(false, 1 - screenPos, false)
-          : ImageLine(true, screenPos, true);
-    case 180:
-      return ImageLine(screenVertical, 1 - screenPos, true);
-    case 270:
-      return screenVertical
-          ? ImageLine(false, screenPos, true)
-          : ImageLine(true, 1 - screenPos, false);
-    default:
-      return ImageLine(screenVertical, screenPos, false);
+  final along = vertical ? g.height : g.width;
+  final across = vertical ? g.width : g.height;
+  final n = min(length ?? along - start, along - start);
+  final b = min(band, across);
+  final a0 = (at - b ~/ 2).clamp(0, across - b);
+  final out = Uint8List(n);
+  for (var i = 0; i < n; i++) {
+    final p = start + i;
+    var sum = 0;
+    for (var k = 0; k < b; k++) {
+      final x = vertical ? a0 + k : p;
+      final y = vertical ? p : a0 + k;
+      sum += g.bytes[y * g.width + x];
+    }
+    out[i] = sum ~/ b;
   }
+  return out;
 }
 
-/// Average a [band]-pixel-thick strip of the frame down to a 1-D grayscale
-/// line along the detection line.
-Uint8List extractStrip(Frame f, ImageLine line, {int band = 10}) {
-  final Uint8List strip;
-  if (line.vertical) {
-    final x0 = (line.pos * f.width - band / 2).round().clamp(0, f.width - band);
-    strip = Uint8List(f.height);
-    for (var row = 0; row < f.height; row++) {
-      var sum = 0;
-      final base = row * f.stride + x0 * f.pixelStride + f.channelOffset;
-      for (var i = 0; i < band; i++) {
-        sum += f.bytes[base + i * f.pixelStride];
-      }
-      strip[row] = sum ~/ band;
-    }
-  } else {
-    final y0 =
-        (line.pos * f.height - band / 2).round().clamp(0, f.height - band);
-    strip = Uint8List(f.width);
-    for (var col = 0; col < f.width; col++) {
-      var sum = 0;
-      final base = col * f.pixelStride + f.channelOffset;
-      for (var r = 0; r < band; r++) {
-        sum += f.bytes[(y0 + r) * f.stride + base];
-      }
-      strip[col] = sum ~/ band;
-    }
+/// Display pixels: grey lifted towards white so black ink reads on top.
+Uint8List rgbaOf(Gray g, {double gain = 0.45, double lift = 145}) {
+  final out = Uint8List(g.width * g.height * 4);
+  for (var i = 0, o = 0; i < g.bytes.length; i++, o += 4) {
+    final v = (g.bytes[i] * gain + lift).round().clamp(0, 255);
+    out[o] = v;
+    out[o + 1] = v;
+    out[o + 2] = v;
+    out[o + 3] = 255;
   }
-  if (line.reversed) {
-    return Uint8List.fromList(strip.reversed.toList());
-  }
-  return strip;
-}
-
-/// After BoxFit.cover of an [imgW]x[imgH] image into a [boxW]x[boxH] box,
-/// the visible part of each image axis as (offset, fraction) in 0..1.
-({double ox, double fx, double oy, double fy}) coverCrop(
-    double imgW, double imgH, double boxW, double boxH) {
-  final scale = max(boxW / imgW, boxH / imgH);
-  final fx = boxW / (imgW * scale);
-  final fy = boxH / (imgH * scale);
-  return (ox: (1 - fx) / 2, fx: fx, oy: (1 - fy) / 2, fy: fy);
+  return out;
 }

@@ -4,48 +4,59 @@ import 'package:flutter/material.dart';
 
 import 'camera_strip.dart';
 
-/// A source of camera frames plus its on-screen preview.
+/// A source of raw camera frames. No platform preview is ever shown: the
+/// canvas draws the frames itself, so [host] is a zero-size widget that only
+/// owns the platform camera lifecycle.
 abstract class CameraFeed {
-  /// Clockwise quarter turns from image space to screen space.
+  /// Clockwise quarter turns from sensor space to screen space.
   int get rotationDegrees;
 
-  /// Whether the preview is mirrored relative to the frames.
-  bool get mirrored;
+  /// Selfie cameras start mirrored, like a mirror.
+  bool get mirrorDefault;
 
-  /// The preview widget; starts delivering frames to [onFrame] once live.
-  Widget buildPreview(void Function(Frame) onFrame);
+  List<String> get cameras;
+  int get index;
+  set index(int i);
+
+  /// Owns the camera; rebuild it (new key) after changing [index].
+  Widget host(void Function(Frame) onFrame);
 }
 
 // ---------------------------------------------------------------- iOS/Android
 
 class MobileCameraFeed implements CameraFeed {
-  MobileCameraFeed(this.camera);
-  final CameraDescription camera;
+  MobileCameraFeed(this._cameras);
+  final List<CameraDescription> _cameras;
+  @override
+  int index = 0;
+
+  CameraDescription get _cam => _cameras[index];
 
   @override
-  int get rotationDegrees => camera.sensorOrientation;
-
-  // ponytail: front-camera preview mirroring not handled yet; back camera
-  // is the primary use. Flip this per lensDirection if it bites.
-  @override
-  bool get mirrored => false;
+  int get rotationDegrees => _cam.sensorOrientation;
 
   @override
-  Widget buildPreview(void Function(Frame) onFrame) =>
-      _MobilePreview(camera: camera, onFrame: onFrame);
+  bool get mirrorDefault => _cam.lensDirection == CameraLensDirection.front;
+
+  @override
+  List<String> get cameras =>
+      [for (final c in _cameras) c.lensDirection.name];
+
+  @override
+  Widget host(void Function(Frame) onFrame) =>
+      _MobileHost(camera: _cam, onFrame: onFrame);
 }
 
-class _MobilePreview extends StatefulWidget {
-  const _MobilePreview({required this.camera, required this.onFrame});
+class _MobileHost extends StatefulWidget {
+  const _MobileHost({required this.camera, required this.onFrame});
   final CameraDescription camera;
   final void Function(Frame) onFrame;
 
   @override
-  State<_MobilePreview> createState() => _MobilePreviewState();
+  State<_MobileHost> createState() => _MobileHostState();
 }
 
-class _MobilePreviewState extends State<_MobilePreview>
-    with WidgetsBindingObserver {
+class _MobileHostState extends State<_MobileHost> with WidgetsBindingObserver {
   CameraController? _controller;
 
   @override
@@ -58,11 +69,16 @@ class _MobilePreviewState extends State<_MobilePreview>
   Future<void> _init() async {
     final controller = CameraController(
       widget.camera,
-      ResolutionPreset.low, // motion detection needs no more
+      ResolutionPreset.medium, // ponytail: drop to low if a phone stutters
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
     await controller.initialize();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    _controller = controller;
     await controller.startImageStream((img) {
       final y = img.planes[0];
       widget.onFrame(Frame(
@@ -72,11 +88,6 @@ class _MobilePreviewState extends State<_MobilePreview>
         stride: y.bytesPerRow,
       ));
     });
-    if (!mounted) {
-      controller.dispose();
-      return;
-    }
-    setState(() => _controller = controller);
   }
 
   @override
@@ -97,50 +108,77 @@ class _MobilePreviewState extends State<_MobilePreview>
   }
 
   @override
-  Widget build(BuildContext context) {
-    final controller = _controller;
-    if (controller == null) return const SizedBox.expand();
-    // Sensor is landscape; swap so the box matches the rotated preview,
-    // then cover the frame.
-    final ps = controller.value.previewSize!;
-    return FittedBox(
-      fit: BoxFit.cover,
-      child: SizedBox(
-        width: ps.height,
-        height: ps.width,
-        child: CameraPreview(controller),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 // --------------------------------------------------------------------- macOS
 
 class MacCameraFeed implements CameraFeed {
+  final _devices = <CameraMacOSDevice>[];
+  @override
+  int index = 0;
+
   @override
   int get rotationDegrees => 0;
 
-  // The plugin sets isVideoMirrored on the capture connection, so streamed
-  // frames are already mirrored exactly like the preview texture.
   @override
-  bool get mirrored => false;
+  bool get mirrorDefault => true;
 
   @override
-  Widget buildPreview(void Function(Frame) onFrame) => LayoutBuilder(
-        // CameraMacOSView sizes itself to MediaQuery.size (the window) before
-        // applying BoxFit.cover; lie about the window size so it covers the
-        // frame instead and image coordinates line up with frame coordinates.
-        builder: (context, constraints) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(size: constraints.biggest),
+  List<String> get cameras =>
+      [for (final d in _devices) d.localizedName ?? d.deviceId];
+
+  String? get _deviceId => index < _devices.length ? _devices[index].deviceId : null;
+
+  @override
+  Widget host(void Function(Frame) onFrame) =>
+      _MacHost(feed: this, onFrame: onFrame);
+}
+
+class _MacHost extends StatefulWidget {
+  const _MacHost({required this.feed, required this.onFrame});
+  final MacCameraFeed feed;
+  final void Function(Frame) onFrame;
+
+  @override
+  State<_MacHost> createState() => _MacHostState();
+}
+
+class _MacHostState extends State<_MacHost> {
+  @override
+  void initState() {
+    super.initState();
+    // Listing prompts for camera permission; do it after the UI is up, not
+    // before runApp, so the window is never black while the prompt waits.
+    if (widget.feed._devices.isEmpty) {
+      CameraMacOSPlatform.instance
+          .listDevices(deviceType: CameraMacOSDeviceType.video)
+          .then((d) => widget.feed._devices
+            ..clear()
+            ..addAll(d));
+    }
+  }
+
+  // The plugin only streams frames from copyPixelBuffer(), which the engine
+  // calls when its Texture is actually painted — so the view must stay in the
+  // tree and painted: 1×1 px at 1% opacity (opacity 0 would skip painting).
+  // Frames are taken unmirrored; the canvas flips them.
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 1,
+        height: 1,
+        child: Opacity(
+          opacity: 0.01,
           child: CameraMacOSView(
+            deviceId: widget.feed._deviceId,
             cameraMode: CameraMacOSMode.photo,
             enableAudio: false,
-            fit: BoxFit.cover,
-            resolution: PictureResolution.low,
+            isVideoMirrored: false,
+            resolution: PictureResolution.medium,
             onCameraInizialized: (controller) {
               controller.startImageStream((img) {
                 if (img == null) return;
-                onFrame(Frame(
+                widget.onFrame(Frame(
                   bytes: img.bytes,
                   width: img.width,
                   height: img.height,

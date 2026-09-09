@@ -5,6 +5,12 @@ white passepartout frame with a square grid. Anything that crosses the line
 plays a note: position along the line picks the pitch, quantised to a scale.
 The cell where it happened flashes black.
 
+What you see is what is analysed: the app draws the very frame it detects
+on, so picture, grid, line and detection share one coordinate system on every
+platform. The whole camera image is always visible; the passepartout adapts
+around it. The grid is anchored at the image centre with 12 cells across the
+short side.
+
 ## Modes
 
 - **Dynamic** — camera and line are fixed; moving objects that cross the line
@@ -26,9 +32,13 @@ Everything is in the caption under the frame. Tap a row to change it.
 | PLAY    | stopped / playing (static only)         |
 | SWEEP   | 4s / 8s / 16s per pass (static only)    |
 | SENS    | sensitivity, set with the slider inside the frame |
-| LAST    | intensity of the last trigger           |
 
 Drag inside the frame to move the line. Double-tap flips its orientation.
+
+The ≡ menu (top right): CAMERA (cycle devices: front/rear, USB, browser
+inputs), FLIP H, FLIP V (mirror the picture and detection together), SYNTH
+(sine, triangle, saw, square, supersaw), LAST (intensity of the last
+trigger).
 
 ## Run
 
@@ -46,10 +56,13 @@ Runs on macOS (`camera_macos`), iOS and Android (`camera`). Audio via
 
 ## How it works
 
-`camera_strip.dart` averages a thin band of pixels along the line into a 1-D
-strip. `motion_detector.dart` diffs consecutive strips per bin with an EMA,
-Schmitt trigger and refractory period. `scale_mapper.dart` turns a bin into a
-MIDI note. `sampler.dart` plays one waveform voice per pitch.
+`feeds.dart` delivers raw frames from the platform camera (no platform
+preview is shown). `camera_strip.dart` orients and flips a frame into a
+screen-space grey buffer, draws it, and averages a thin band of pixels along
+the line into a 1-D strip. `motion_detector.dart` diffs consecutive strips per
+bin with an EMA, Schmitt trigger and refractory period. `scale_mapper.dart`
+turns a bin into a MIDI note. `sampler.dart` plays one waveform voice per
+(instrument, pitch).
 
 ## License
 
