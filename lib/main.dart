@@ -1,0 +1,103 @@
+import 'dart:io';
+
+import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
+
+import 'canvas_screen.dart';
+import 'feeds.dart';
+import 'sampler.dart';
+import 'scale_mapper.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final sampler = Sampler();
+  await sampler.init();
+  CameraFeed? feed;
+  if (Platform.isMacOS) {
+    feed = MacCameraFeed();
+  } else {
+    try {
+      final camera = (await availableCameras()).firstOrNull;
+      if (camera != null) feed = MobileCameraFeed(camera);
+    } catch (_) {
+      // No camera available → tap test mode.
+    }
+  }
+  runApp(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: Colors.white,
+      fontFamily: 'monospace',
+    ),
+    home: feed == null
+        ? TapTestScreen(sampler: sampler)
+        : CanvasScreen(sampler: sampler, feed: feed),
+  ));
+}
+
+/// Milestone 1 test mode: tap anywhere — vertical position picks the note.
+/// Proves trigger latency and polyphony before any camera code exists.
+class TapTestScreen extends StatefulWidget {
+  const TapTestScreen({super.key, required this.sampler});
+  final Sampler sampler;
+
+  @override
+  State<TapTestScreen> createState() => _TapTestScreenState();
+}
+
+class _TapTestScreenState extends State<TapTestScreen> {
+  final _flash = List<double>.filled(bins, 0);
+
+  void _tap(TapDownDetails d, Size size) {
+    // Low notes at the bottom.
+    final bin =
+        ((1 - d.localPosition.dy / size.height) * bins).floor().clamp(0, bins - 1);
+    widget.sampler.playNote(binToMidi(bin), 0.8);
+    setState(() => _flash[bin] = 1);
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _flash[bin] = 0);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: LayoutBuilder(
+        builder: (context, constraints) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => _tap(d, constraints.biggest),
+          child: CustomPaint(
+            size: constraints.biggest,
+            painter: _LinePainter(List.of(_flash)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LinePainter extends CustomPainter {
+  _LinePainter(this.flash);
+  final List<double> flash;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final line = Paint()
+      ..color = Colors.black
+      ..strokeWidth = 1;
+    final x = size.width / 2;
+    canvas.drawLine(Offset(x, 0), Offset(x, size.height), line);
+    final binH = size.height / bins;
+    for (var i = 0; i < bins; i++) {
+      final y = size.height - (i + 0.5) * binH;
+      canvas.drawLine(Offset(x - 4, y), Offset(x + 4, y), line);
+      if (flash[i] > 0) {
+        canvas.drawCircle(Offset(x, y), 8, Paint()..color = Colors.black);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LinePainter old) => true;
+}
