@@ -33,6 +33,16 @@ class Settings {
 
   void cycleScale() => scaleName = _next(scales.keys.toList(), scaleName);
   void cycleRoot() => root = _next(_roots.values.toList(), root);
+  /// Value plus direction, since 0.25 is the *least* touchy setting.
+  String get sensitivityLabel {
+    const words = ['low', 'mid', 'high', 'max'];
+    var i = 0;
+    while (i < _sensSteps.length - 1 && sensitivity >= _sensSteps[i + 1] - 1e-9) {
+      i++;
+    }
+    return '${sensitivity.toStringAsFixed(2)} ${words[i]}';
+  }
+
   void cycleSensitivity() {
     final i = _sensSteps.indexWhere((s) => s > sensitivity + 1e-9);
     sensitivity = i < 0 ? _sensSteps.first : _sensSteps[i];
@@ -110,7 +120,7 @@ class CanvasScreen extends StatefulWidget {
 class _CanvasScreenState extends State<CanvasScreen>
     with SingleTickerProviderStateMixin {
   final _settings = Settings();
-  MotionDetector? _detector;
+  StripDetector? _detector;
   final _flash = ValueNotifier<List<double>>(const []);
   final _lastIntensity = ValueNotifier<double>(0);
   ui.Image? _image;
@@ -125,10 +135,8 @@ class _CanvasScreenState extends State<CanvasScreen>
   bool _flipV = false;
   double? _pos; // across the line axis, image px; null = centre
 
-  // Static mode: the line sweeps as a playhead. Moving it over a still scene
-  // turns every edge it crosses into a strip diff, which MotionDetector
-  // already treats as a trigger. ponytail: low-contrast objects stay silent;
-  // add a luminance threshold detector if edge triggering is not enough.
+  // Static mode: the line sweeps as a playhead over a still scene, and
+  // StaticDetector scores each bin by its contrast against the strip median.
   bool _static = false;
   int _sweepSeconds = 8;
   late final AnimationController _head = AnimationController(
@@ -154,6 +162,11 @@ class _CanvasScreenState extends State<CanvasScreen>
         _detector?.sensitivity = _settings.sensitivity;
       });
 
+  StripDetector _makeDetector(int bins) => (_static
+      ? StaticDetector(bins: bins)
+      : MotionDetector(bins: bins))
+    ..sensitivity = _settings.sensitivity;
+
   Geom _geomFor(Gray g) {
     var geom = _geom;
     if (geom == null ||
@@ -162,8 +175,7 @@ class _CanvasScreenState extends State<CanvasScreen>
         geom.vertical != _vertical) {
       geom = Geom(g.width, g.height, _vertical);
       if (_detector?.bins != geom.bins) {
-        _detector = MotionDetector(bins: geom.bins)
-          ..sensitivity = _settings.sensitivity;
+        _detector = _makeDetector(geom.bins);
         _flash.value = List.filled(geom.bins, 0);
       }
       _geom = geom;
@@ -284,7 +296,7 @@ class _CanvasScreenState extends State<CanvasScreen>
             onTap: () => setState(_settings.cycleRoot)),
         captionRow('synth', widget.sampler.instrumentName,
             onTap: () => setState(widget.sampler.cycleInstrument)),
-        captionRow('sens', _settings.sensitivity.toStringAsFixed(2),
+        captionRow('sens', _settings.sensitivityLabel,
             onTap: () => setState(_settings.cycleSensitivity),
             onDrag: (dx) => _setSensitivity(_settings.sensitivity + dx / 100)),
       ];
@@ -302,6 +314,8 @@ class _CanvasScreenState extends State<CanvasScreen>
           setState(() {
             _static = !_static;
             if (!_static) _head.stop();
+            final g = _geom;
+            if (g != null) _detector = _makeDetector(g.bins);
           });
         }),
         if (_static) ...[
