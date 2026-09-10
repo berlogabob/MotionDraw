@@ -76,5 +76,9 @@ void main() {
     await tester.pump();
     expect(find.textContaining('LEN    : 32'), findsOneWidget);
     expect(find.text('CLEAR'), findsOneWidget);
+    await tester.tap(find.textContaining('SEQ    : LOOP'));
+    await tester.pump();
+    expect(find.textContaining('SEQ    : ONCE'), findsOneWidget);
+    expect(find.textContaining('LEN'), findsNothing);
   });
 }

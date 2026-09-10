@@ -25,10 +25,13 @@ audio, allow the camera). Runs natively on macOS, iOS and Android.
 4. Optional tempo:
    - **TEMPO : QUANT** — detected notes wait for the next grid tick and play
      together, so a scene falls onto a beat.
-   - **TEMPO : SEQ** — each detection is appended to a looping step sequence
-     played one note per tick. Empty steps fill first, then the oldest step
-     is overwritten, so the phrase keeps following the scene. `LEN` sets the
-     loop length; `CLEAR` empties it.
+   - **TEMPO : SEQ** — detections are played back one note per tick.
+     `SEQ : LOOP` appends them to a looping step sequence: empty steps fill
+     first, then the oldest step is overwritten, so the phrase keeps
+     following the scene; `LEN` sets the loop length. `SEQ : ONCE` queues
+     them instead: each tick plays the oldest one and it is gone, so a burst
+     becomes a run spread over time and the line goes silent when the queue
+     empties. `CLEAR` empties either.
    - `BPM` taps through 80, 100, 120, 140, 160; drag it sideways for any
      value between 40 and 240. `DIV` is the tick: 1/4, 1/8, 1/16.
    - The square at the end of the TEMPO line is the click: it fills on every
@@ -56,8 +59,9 @@ to change it. Everything else lives in the settings sheet behind ≡.
 |          | TEMPO      | off / quant / seq |
 |          | BPM        | tap 80…160, drag 40…240 (tempo on) |
 |          | DIV        | 1/4, 1/8, 1/16 (tempo on) |
-|          | LEN        | 8 / 16 / 32 steps (seq) |
-|          | CLEAR      | empty the sequence (seq) |
+|          | SEQ        | loop / once (seq) |
+|          | LEN        | 8 / 16 / 32 steps (seq loop) |
+|          | CLEAR      | empty the sequence or queue (seq) |
 | settings | SCALE      | penta minor, penta major, minor, major, blues, chromatic |
 |          | ROOT       | C … B (octave 3) |
 |          | SYNTH      | sine, triangle, saw, square, supersaw |

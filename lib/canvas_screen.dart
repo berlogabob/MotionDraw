@@ -148,6 +148,8 @@ class _CanvasScreenState extends State<CanvasScreen>
   final _beat = ValueNotifier<int>(0);
   final _pending = <int, double>{}; // bin → intensity (quant)
   final _seq = Sequence(16);
+  bool _loop = true; // seq: loop the sequence, or play each note once
+  final _queue = <(int, double)>[]; // seq once: oldest first
   int _bins = 0; // bins of the last detection, for flash length
 
   void _blink(int kind) {
@@ -180,7 +182,9 @@ class _CanvasScreenState extends State<CanvasScreen>
         }
         _pending.clear();
       case Tempo.seq:
-        final n = _seq.tick();
+        final n = _loop
+            ? _seq.tick()
+            : (_queue.isEmpty ? null : _queue.removeAt(0));
         if (n == null) return;
         _play(n.$1, n.$2);
         if (n.$1 < flash.length) flash[n.$1] = 1;
@@ -305,7 +309,11 @@ class _CanvasScreenState extends State<CanvasScreen>
         case Tempo.quant:
           _pending[bin] = max(_pending[bin] ?? 0, e.intensity);
         case Tempo.seq:
-          _seq.add(bin, e.intensity);
+          if (_loop) {
+            _seq.add(bin, e.intensity);
+          } else {
+            _queue.add((bin, e.intensity));
+          }
         case Tempo.off:
           _play(bin, e.intensity);
           flash[bin] = 1;
@@ -449,10 +457,18 @@ class _CanvasScreenState extends State<CanvasScreen>
               }),
             ],
             if (_tempo == Tempo.seq) ...[
-              captionRow('len', '${_seq.steps}',
-                  onTap: () => setState(() =>
-                      _seq.resize(_seq.steps == 32 ? 8 : _seq.steps * 2))),
-              captionRow('clear', '', onTap: () => setState(_seq.clear)),
+              captionRow('seq', _loop ? 'loop' : 'once',
+                  onTap: () => setState(() => _loop = !_loop)),
+              if (_loop)
+                captionRow('len', '${_seq.steps}',
+                    onTap: () => setState(() =>
+                        _seq.resize(_seq.steps == 32 ? 8 : _seq.steps * 2))),
+              captionRow('clear', '', onTap: () {
+                setState(() {
+                  _seq.clear();
+                  _queue.clear();
+                });
+              }),
             ],
             if (_tempo != Tempo.off)
               ValueListenableBuilder<int>(
