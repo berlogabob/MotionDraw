@@ -126,7 +126,6 @@ class _CanvasScreenState extends State<CanvasScreen>
   final _lastIntensity = ValueNotifier<double>(0);
   ui.Image? _image;
   Geom? _geom;
-  double _frameLeft = 0; // caption lines up with the frame's left edge
   bool _settingsOpen = false;
   bool _busy = false;
   bool _decoding = false;
@@ -258,11 +257,6 @@ class _CanvasScreenState extends State<CanvasScreen>
           final dst = g == null
               ? Geom.fit(area, 4, 3)
               : Geom.fit(area, g.width, g.height);
-          if (dst.left != _frameLeft) {
-            // Layout-time value; the caption picks it up on the next build.
-            WidgetsBinding.instance.addPostFrameCallback(
-                (_) => mounted ? setState(() => _frameLeft = dst.left) : null);
-          }
           final picture = GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanUpdate: (d) {
@@ -289,8 +283,12 @@ class _CanvasScreenState extends State<CanvasScreen>
             ),
           );
           return Stack(
+            clipBehavior: Clip.none,
             children: [
               picture,
+              // Caption sits right under the frame, wherever the frame ends.
+              Positioned(
+                  left: dst.left, top: dst.bottom + 16, child: _caption()),
               if (_settingsOpen)
                 Positioned.fromRect(rect: dst, child: _settingsSheet()),
               // Hamburger: three ink lines, flush with the frame's top-right.
@@ -416,10 +414,9 @@ class _CanvasScreenState extends State<CanvasScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: _canvas()),
-                  const SizedBox(height: 16),
-                  Padding(
-                      padding: EdgeInsets.only(left: _frameLeft),
-                      child: _caption()),
+                  // Room for the two caption lines when the frame is as tall
+                  // as the area (landscape screens).
+                  const SizedBox(height: 56),
                 ],
               ),
             ),
