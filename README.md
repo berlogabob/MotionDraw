@@ -20,24 +20,25 @@ short side.
 
 ## Controls
 
-Everything is a caption row under the frame. Tap a row to change it. Nothing
-is hidden in a menu.
+Two caption lines under the frame are the performance controls; tap a row to
+change it. Everything else is behind the ≡ button at the frame's top-right,
+which opens a settings sheet inside the frame window.
 
-| Column | Row    | Values                                  |
-| ------ | ------ | --------------------------------------- |
-| music  | SCALE  | penta minor/major, minor, major, blues, chromatic |
-|        | ROOT   | C … B                                   |
-|        | SYNTH  | sine, triangle, saw, square, supersaw   |
-|        | SENS   | tap: 0.5 / 1 / 2 / 4; drag sideways for fine control |
-| line   | LINE   | vertical / horizontal                   |
-|        | LOW    | bottom/top or left/right — pitch direction, also sweep direction |
-|        | MODE   | dynamic / static                        |
-|        | PLAY   | stopped / playing (static only)         |
-|        | SWEEP  | 4s / 8s / 16s per pass (static only)    |
-| camera | CAMERA | cycle devices: front/rear, USB, browser inputs |
-|        | FLIP H | mirror picture and detection together   |
-|        | FLIP V |                                         |
-|        | LAST   | intensity of the last trigger           |
+| Where    | Row    | Values                                  |
+| -------- | ------ | --------------------------------------- |
+| screen   | MODE   | dynamic / static                        |
+|          | PLAY   | stopped / playing (static only)         |
+|          | SWEEP  | 4s / 8s / 16s per pass (static only)    |
+|          | LINE   | vertical / horizontal                   |
+|          | LOW    | bottom/top or left/right — pitch direction, also sweep direction |
+| settings | SCALE  | penta minor/major, minor, major, blues, chromatic |
+|          | ROOT   | C … B                                   |
+|          | SYNTH  | sine, triangle, saw, square, supersaw   |
+|          | SENS   | 0.25 LOW … 4 MAX; tap cycles presets, drag the track for fine control |
+|          | CAMERA | cycle devices: front/rear, USB, browser inputs |
+|          | FLIP H | mirror picture and detection together   |
+|          | FLIP V |                                         |
+|          | LAST   | intensity of the last trigger           |
 
 Drag inside the frame to move the line. Double-tap flips its orientation.
 

@@ -15,7 +15,6 @@ const matte = 24.0;
 const ink = Colors.black;
 const _band = 10; // strip thickness in image pixels
 const captionStyle = TextStyle(fontSize: 11, letterSpacing: 1.0, color: ink);
-const _column = 160.0; // caption column width: two fit a phone, three a laptop
 const _sensSteps = [0.5, 1.0, 2.0, 4.0];
 
 const _roots = {
@@ -90,7 +89,9 @@ class Geom {
 Widget captionRow(String label, String value,
     {VoidCallback? onTap, void Function(double dx)? onDrag}) {
   final text = Text(
-    '${label.toUpperCase().padRight(6)} : ${value.toUpperCase()}',
+    value.isEmpty
+        ? label.toUpperCase()
+        : '${label.toUpperCase().padRight(6)} : ${value.toUpperCase()}',
     style: captionStyle,
     maxLines: 1,
     overflow: TextOverflow.ellipsis,
@@ -126,6 +127,7 @@ class _CanvasScreenState extends State<CanvasScreen>
   ui.Image? _image;
   Geom? _geom;
   double _frameLeft = 0; // caption lines up with the frame's left edge
+  bool _settingsOpen = false;
   bool _busy = false;
   bool _decoding = false;
 
@@ -261,7 +263,7 @@ class _CanvasScreenState extends State<CanvasScreen>
             WidgetsBinding.instance.addPostFrameCallback(
                 (_) => mounted ? setState(() => _frameLeft = dst.left) : null);
           }
-          return GestureDetector(
+          final picture = GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanUpdate: (d) {
               if (g == null) return;
@@ -286,84 +288,117 @@ class _CanvasScreenState extends State<CanvasScreen>
               ),
             ),
           );
+          return Stack(
+            children: [
+              picture,
+              if (_settingsOpen)
+                Positioned.fromRect(rect: dst, child: _settingsSheet()),
+              // Hamburger: three ink lines, flush with the frame's top-right.
+              Positioned(
+                top: dst.top,
+                left: dst.right - 32,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => setState(() => _settingsOpen = !_settingsOpen),
+                  child: const CustomPaint(
+                      size: Size(32, 32), painter: _HamburgerPainter()),
+                ),
+              ),
+            ],
+          );
         },
       );
 
-  List<Widget> _music() => [
-        captionRow('scale', _settings.scaleName,
-            onTap: () => setState(_settings.cycleScale)),
-        captionRow('root', _settings.rootName,
-            onTap: () => setState(_settings.cycleRoot)),
-        captionRow('synth', widget.sampler.instrumentName,
-            onTap: () => setState(widget.sampler.cycleInstrument)),
-        captionRow('sens', _settings.sensitivityLabel,
-            onTap: () => setState(_settings.cycleSensitivity),
-            onDrag: (dx) => _setSensitivity(_settings.sensitivity + dx / 100)),
-      ];
+  Widget _row(List<Widget> items) => Wrap(spacing: 24, children: items);
 
-  List<Widget> _line() => [
-        captionRow('line', _vertical ? 'vertical' : 'horizontal',
-            onTap: () => setState(() => _vertical = !_vertical)),
-        captionRow(
-            'low',
-            _vertical
-                ? (_reversed ? 'top' : 'bottom')
-                : (_reversed ? 'right' : 'left'),
-            onTap: () => setState(() => _reversed = !_reversed)),
-        captionRow('mode', _static ? 'static' : 'dynamic', onTap: () {
-          setState(() {
-            _static = !_static;
-            if (!_static) _head.stop();
-            final g = _geom;
-            if (g != null) _detector = _makeDetector(g.bins);
-          });
-        }),
-        if (_static) ...[
-          captionRow('play', _head.isAnimating ? 'playing' : 'stopped',
-              onTap: _togglePlay),
-          captionRow('sweep', '${_sweepSeconds}s', onTap: _cycleSweep),
-        ],
-      ];
-
-  List<Widget> _camera() {
-    final feed = widget.feed;
-    final cams = feed.cameras;
-    return [
-      captionRow(
-          'camera',
-          _geom == null
-              ? 'waiting'
-              : cams.isEmpty
-                  ? '-'
-                  : cams[feed.index],
-          onTap: cams.length < 2
-              ? null
-              : () => setState(() => feed.index = (feed.index + 1) % cams.length)),
-      captionRow('flip h', _flipH ? 'on' : 'off',
-          onTap: () => setState(() => _flipH = !_flipH)),
-      captionRow('flip v', _flipV ? 'on' : 'off',
-          onTap: () => setState(() => _flipV = !_flipV)),
-      ValueListenableBuilder<double>(
-        valueListenable: _lastIntensity,
-        builder: (context, v, _) => captionRow('last', '${(v * 100).round()}%'),
-      ),
-    ];
-  }
-
-  Widget _caption() => Wrap(
-        spacing: 16,
-        runSpacing: 16,
+  /// Two lines: what you touch while playing.
+  Widget _caption() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final rows in [_music(), _line(), _camera()])
-            SizedBox(
-              width: _column,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: rows,
-              ),
-            ),
+          _row([
+            captionRow('mode', _static ? 'static' : 'dynamic', onTap: () {
+              setState(() {
+                _static = !_static;
+                if (!_static) _head.stop();
+                final g = _geom;
+                if (g != null) _detector = _makeDetector(g.bins);
+              });
+            }),
+            if (_static) ...[
+              captionRow('play', _head.isAnimating ? 'playing' : 'stopped',
+                  onTap: _togglePlay),
+              captionRow('sweep', '${_sweepSeconds}s', onTap: _cycleSweep),
+            ],
+          ]),
+          _row([
+            captionRow('line', _vertical ? 'vertical' : 'horizontal',
+                onTap: () => setState(() => _vertical = !_vertical)),
+            captionRow(
+                'low',
+                _vertical
+                    ? (_reversed ? 'top' : 'bottom')
+                    : (_reversed ? 'right' : 'left'),
+                onTap: () => setState(() => _reversed = !_reversed)),
+          ]),
         ],
       );
+
+  /// Everything else, as a sheet over the frame window. The camera keeps
+  /// streaming underneath.
+  Widget _settingsSheet() {
+    final feed = widget.feed;
+    final cams = feed.cameras;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+          color: Colors.white, border: Border.all(color: ink)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 48, 16),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              captionRow('scale', _settings.scaleName,
+                  onTap: () => setState(_settings.cycleScale)),
+              captionRow('root', _settings.rootName,
+                  onTap: () => setState(_settings.cycleRoot)),
+              captionRow('synth', widget.sampler.instrumentName,
+                  onTap: () => setState(widget.sampler.cycleInstrument)),
+              captionRow('sens', _settings.sensitivityLabel,
+                  onTap: () => setState(_settings.cycleSensitivity)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: _Track(
+                    value: _settings.sensitivity, onChanged: _setSensitivity),
+              ),
+              captionRow(
+                  'camera',
+                  _geom == null
+                      ? 'waiting'
+                      : cams.isEmpty
+                          ? '-'
+                          : cams[feed.index],
+                  onTap: cams.length < 2
+                      ? null
+                      : () => setState(
+                          () => feed.index = (feed.index + 1) % cams.length)),
+              captionRow('flip h', _flipH ? 'on' : 'off',
+                  onTap: () => setState(() => _flipH = !_flipH)),
+              captionRow('flip v', _flipV ? 'on' : 'off',
+                  onTap: () => setState(() => _flipV = !_flipV)),
+              ValueListenableBuilder<double>(
+                valueListenable: _lastIntensity,
+                builder: (context, v, _) =>
+                    captionRow('last', '${(v * 100).round()}%'),
+              ),
+              const SizedBox(height: 16),
+              captionRow('close', '',
+                  onTap: () => setState(() => _settingsOpen = false)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -478,4 +513,68 @@ class FramePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(FramePainter old) => true;
+}
+
+class _HamburgerPainter extends CustomPainter {
+  const _HamburgerPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = ink
+      ..strokeWidth = 1;
+    const w = 14.0;
+    final x0 = size.width - w - 8;
+    for (var i = 0; i < 3; i++) {
+      final y = 10.0 + i * 4;
+      canvas.drawLine(Offset(x0, y), Offset(x0 + w, y), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HamburgerPainter old) => false;
+}
+
+/// Sensitivity track: 1 px line, square knob, log scale 0.25…4 so the four
+/// presets sit evenly. Drag anywhere on it.
+class _Track extends StatelessWidget {
+  const _Track({required this.value, required this.onChanged});
+  final double value;
+  final void Function(double) onChanged;
+
+  static double _toT(double v) => log(v / 0.25) / log(16);
+  static double _fromT(double t) => 0.25 * pow(16, t.clamp(0.0, 1.0));
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, c) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (d) =>
+              onChanged(_fromT(d.localPosition.dx / c.maxWidth)),
+          onTapDown: (d) => onChanged(_fromT(d.localPosition.dx / c.maxWidth)),
+          child: CustomPaint(
+            size: Size(c.maxWidth, 16),
+            painter: _TrackPainter(_toT(value)),
+          ),
+        ),
+      );
+}
+
+class _TrackPainter extends CustomPainter {
+  _TrackPainter(this.t);
+  final double t;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = ink
+      ..strokeWidth = 1;
+    final y = size.height / 2;
+    canvas.drawLine(Offset(0, y), Offset(size.width, y), p);
+    final x = (t * (size.width - 8)).clamp(0.0, size.width - 8);
+    canvas.drawRect(Rect.fromLTWH(x, y - 4, 8, 8), Paint()..color = ink);
+  }
+
+  @override
+  bool shouldRepaint(_TrackPainter old) => old.t != t;
 }
