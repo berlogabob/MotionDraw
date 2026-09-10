@@ -1,0 +1,7 @@
+#!/bin/sh
+# Regenerate the PDF documentation when README.md is part of the commit.
+# Enable once with: git config core.hooksPath tools/hooks
+if git diff --cached --name-only | grep -qx README.md; then
+  tools/readme_pdf.sh || exit 1
+  git add docs/readme-body.typ docs/MotionDraw.pdf
+fi

@@ -142,6 +142,13 @@ Platform notes:
 Deployment: every push to `main` builds the web app and publishes it to
 GitHub Pages through `.github/workflows/pages.yml`.
 
+## Documentation PDF
+
+`docs/MotionDraw.pdf` is generated from this README (pandoc → Typst).
+Enable the hook once with `git config core.hooksPath tools/hooks`; every
+commit that touches README.md then regenerates `docs/readme-body.typ` and
+the PDF and stages them. By hand: `tools/readme_pdf.sh`.
+
 ## Repository
 
 ```
@@ -149,6 +156,8 @@ lib/           app code (see How it works)
 test/          unit tests for orient/strip, detectors, scale, sequence; widget tests for the UI
 web/           Flutter web scaffold with the SoLoud loader scripts
 assets/fonts/  IBM Plex Mono (OFL)
+docs/          Typst template and generated PDF of this README
+tools/         readme_pdf.sh and the pre-commit hook
 android/ ios/ macos/   platform runners
 ```
 
