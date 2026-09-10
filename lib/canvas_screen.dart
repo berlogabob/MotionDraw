@@ -143,13 +143,25 @@ class _CanvasScreenState extends State<CanvasScreen>
   int _bpm = 120;
   int _div = 8; // 4 | 8 | 16
   Timer? _clock;
+  int _tickCount = 0;
+  // Visual click: 0 = off, 1 = subdivision, 2 = downbeat (quarter note).
+  final _beat = ValueNotifier<int>(0);
   final _pending = <int, double>{}; // bin → intensity (quant)
   final _seq = Sequence(16);
   int _bins = 0; // bins of the last detection, for flash length
 
+  void _blink(int kind) {
+    _beat.value = kind;
+    Future.delayed(const Duration(milliseconds: 90), () {
+      if (mounted) _beat.value = 0;
+    });
+  }
+
   void _restartClock() {
     _clock?.cancel();
     _clock = null;
+    _tickCount = 0;
+    _beat.value = 0;
     if (_tempo == Tempo.off) return;
     _clock = Timer.periodic(
         Duration(milliseconds: tickMs(_bpm, _div)), (_) => _tick());
@@ -157,6 +169,7 @@ class _CanvasScreenState extends State<CanvasScreen>
 
   void _tick() {
     if (!mounted) return;
+    _blink(_tickCount++ % (_div ~/ 4) == 0 ? 2 : 1);
     final flash = List<double>.filled(_bins, 0);
     switch (_tempo) {
       case Tempo.quant:
@@ -304,6 +317,7 @@ class _CanvasScreenState extends State<CanvasScreen>
   @override
   void dispose() {
     _clock?.cancel();
+    _beat.dispose();
     _head.dispose();
     _flash.dispose();
     _lastIntensity.dispose();
@@ -440,6 +454,12 @@ class _CanvasScreenState extends State<CanvasScreen>
                       _seq.resize(_seq.steps == 32 ? 8 : _seq.steps * 2))),
               captionRow('clear', '', onTap: () => setState(_seq.clear)),
             ],
+            if (_tempo != Tempo.off)
+              ValueListenableBuilder<int>(
+                valueListenable: _beat,
+                builder: (context, kind, _) => CustomPaint(
+                    size: const Size(16, 16), painter: _BeatPainter(kind)),
+              ),
           ]),
         ],
       );
@@ -676,4 +696,27 @@ class _TrackPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TrackPainter old) => old.t != t;
+}
+
+/// The metronome square: outline between ticks, filled on a subdivision,
+/// filled and double-size on the downbeat.
+class _BeatPainter extends CustomPainter {
+  _BeatPainter(this.kind);
+  final int kind;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = kind == 2 ? 7.0 : 4.0;
+    final rect = Rect.fromCenter(center: c, width: 2 * r, height: 2 * r);
+    canvas.drawRect(
+        rect,
+        Paint()
+          ..color = ink
+          ..style = kind == 0 ? PaintingStyle.stroke : PaintingStyle.fill
+          ..strokeWidth = 1);
+  }
+
+  @override
+  bool shouldRepaint(_BeatPainter old) => old.kind != kind;
 }

@@ -31,6 +31,9 @@ audio, allow the camera). Runs natively on macOS, iOS and Android.
      loop length; `CLEAR` empties it.
    - `BPM` taps through 80, 100, 120, 140, 160; drag it sideways for any
      value between 40 and 240. `DIV` is the tick: 1/4, 1/8, 1/16.
+   - The square at the end of the TEMPO line is the click: it fills on every
+     tick and grows on the downbeat (each quarter note). Notes only ever
+     sound on those fills.
 5. Open the ≡ button at the frame's top-right for scale, root, synth,
    sensitivity, camera and flips. The camera keeps running underneath.
 
