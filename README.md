@@ -31,9 +31,11 @@ which opens a settings sheet inside the frame window.
 |          | SWEEP  | 4s / 8s / 16s per pass (static only)    |
 |          | LINE   | vertical / horizontal                   |
 |          | LOW    | bottom/top or left/right — pitch direction, also sweep direction |
-|          | TEMPO  | off / on — notes wait for the next grid tick |
+|          | TEMPO  | off / quant / seq — quant: notes wait for the next tick and play together; seq: detections fill a looping step sequence, one note per tick |
 |          | BPM    | tap cycles 80…160, drag sideways for any value (tempo on) |
 |          | DIV    | 1/4, 1/8, 1/16 (tempo on)               |
+|          | LEN    | 8 / 16 / 32 steps (seq)                 |
+|          | CLEAR  | empty the sequence (seq)                |
 | settings | SCALE  | penta minor/major, minor, major, blues, chromatic |
 |          | ROOT   | C … B                                   |
 |          | SYNTH  | sine, triangle, saw, square, supersaw   |

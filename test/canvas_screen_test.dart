@@ -65,7 +65,16 @@ void main() {
     expect(find.textContaining('MODE   : STATIC'), findsOneWidget);
     await tester.tap(find.textContaining('TEMPO'));
     await tester.pump();
+    expect(find.textContaining('TEMPO  : QUANT'), findsOneWidget);
     expect(find.textContaining('BPM    : 120'), findsOneWidget);
     expect(find.textContaining('DIV    : 1/8'), findsOneWidget);
+    await tester.tap(find.textContaining('TEMPO'));
+    await tester.pump();
+    expect(find.textContaining('TEMPO  : SEQ'), findsOneWidget);
+    expect(find.textContaining('LEN    : 16'), findsOneWidget);
+    await tester.tap(find.textContaining('LEN'));
+    await tester.pump();
+    expect(find.textContaining('LEN    : 32'), findsOneWidget);
+    expect(find.text('CLEAR'), findsOneWidget);
   });
 }

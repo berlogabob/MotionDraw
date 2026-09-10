@@ -11,6 +11,7 @@ import 'web_feed_stub.dart' if (dart.library.js_interop) 'web_feed.dart';
 import 'motion_detector.dart';
 import 'sampler.dart';
 import 'scale_mapper.dart';
+import 'sequence.dart';
 
 /// Cells across the shorter side of the camera image, on every device.
 const cellsAcross = 12;
@@ -19,6 +20,8 @@ const ink = Colors.black;
 const _band = 10; // strip thickness in image pixels
 const captionReserve = 72.0; // three caption lines under the frame
 const _bpmSteps = [80, 100, 120, 140, 160];
+
+enum Tempo { off, quant, seq }
 const captionStyle = TextStyle(fontSize: 11, letterSpacing: 1.0, color: ink);
 const _sensSteps = [0.5, 1.0, 2.0, 4.0];
 
@@ -133,30 +136,44 @@ class _CanvasScreenState extends State<CanvasScreen>
   Geom? _geom;
   bool _settingsOpen = false;
 
-  // Tempo sync: detected notes wait for the next grid tick.
-  bool _tempo = false;
+  // Tempo sync. QUANT: detected notes wait for the next grid tick and play
+  // together. SEQ: detections fill a looping step sequence played one note
+  // per tick.
+  Tempo _tempo = Tempo.off;
   int _bpm = 120;
   int _div = 8; // 4 | 8 | 16
   Timer? _clock;
-  final _pending = <int, double>{}; // bin → intensity
-  int _pendingBins = 0;
+  final _pending = <int, double>{}; // bin → intensity (quant)
+  final _seq = Sequence(16);
+  int _bins = 0; // bins of the last detection, for flash length
 
   void _restartClock() {
     _clock?.cancel();
     _clock = null;
-    if (!_tempo) return;
+    if (_tempo == Tempo.off) return;
     _clock = Timer.periodic(
-        Duration(milliseconds: tickMs(_bpm, _div)), (_) => _flush());
+        Duration(milliseconds: tickMs(_bpm, _div)), (_) => _tick());
   }
 
-  void _flush() {
-    if (_pending.isEmpty || !mounted) return;
-    final flash = List<double>.filled(_pendingBins, 0);
-    for (final e in _pending.entries) {
-      _play(e.key, e.value);
-      if (e.key < flash.length) flash[e.key] = 1;
+  void _tick() {
+    if (!mounted) return;
+    final flash = List<double>.filled(_bins, 0);
+    switch (_tempo) {
+      case Tempo.quant:
+        if (_pending.isEmpty) return;
+        for (final e in _pending.entries) {
+          _play(e.key, e.value);
+          if (e.key < flash.length) flash[e.key] = 1;
+        }
+        _pending.clear();
+      case Tempo.seq:
+        final n = _seq.tick();
+        if (n == null) return;
+        _play(n.$1, n.$2);
+        if (n.$1 < flash.length) flash[n.$1] = 1;
+      case Tempo.off:
+        return;
     }
-    _pending.clear();
     _showFlash(flash);
   }
 
@@ -270,15 +287,18 @@ class _CanvasScreenState extends State<CanvasScreen>
       var bin = _vertical ? bins - 1 - e.bin : e.bin;
       if (_reversed) bin = bins - 1 - bin;
       _lastIntensity.value = e.intensity;
-      if (_tempo) {
-        _pendingBins = bins;
-        _pending[bin] = max(_pending[bin] ?? 0, e.intensity);
-      } else {
-        _play(bin, e.intensity);
-        flash[bin] = 1;
+      _bins = bins;
+      switch (_tempo) {
+        case Tempo.quant:
+          _pending[bin] = max(_pending[bin] ?? 0, e.intensity);
+        case Tempo.seq:
+          _seq.add(bin, e.intensity);
+        case Tempo.off:
+          _play(bin, e.intensity);
+          flash[bin] = 1;
       }
     }
-    if (!_tempo) _showFlash(flash);
+    if (_tempo == Tempo.off) _showFlash(flash);
   }
 
   @override
@@ -387,14 +407,14 @@ class _CanvasScreenState extends State<CanvasScreen>
                 onTap: () => setState(() => _reversed = !_reversed)),
           ]),
           _row([
-            captionRow('tempo', _tempo ? 'on' : 'off', onTap: () {
+            captionRow('tempo', _tempo.name, onTap: () {
               setState(() {
-                _tempo = !_tempo;
+                _tempo = Tempo.values[(_tempo.index + 1) % Tempo.values.length];
+                _pending.clear();
                 _restartClock();
-                if (!_tempo) _pending.clear();
               });
             }),
-            if (_tempo) ...[
+            if (_tempo != Tempo.off) ...[
               captionRow('bpm', '$_bpm', onTap: () {
                 setState(() {
                   final i = _bpmSteps.indexWhere((b) => b > _bpm);
@@ -413,6 +433,12 @@ class _CanvasScreenState extends State<CanvasScreen>
                   _restartClock();
                 });
               }),
+            ],
+            if (_tempo == Tempo.seq) ...[
+              captionRow('len', '${_seq.steps}',
+                  onTap: () => setState(() =>
+                      _seq.resize(_seq.steps == 32 ? 8 : _seq.steps * 2))),
+              captionRow('clear', '', onTap: () => setState(_seq.clear)),
             ],
           ]),
         ],
