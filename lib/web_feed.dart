@@ -124,3 +124,12 @@ class _WebHostState extends State<_WebHost> {
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
 }
+
+/// Browser fullscreen toggle; must be called from a user gesture.
+void toggleFullscreen() {
+  if (web.document.fullscreenElement == null) {
+    web.document.documentElement?.requestFullscreen();
+  } else {
+    web.document.exitFullscreen();
+  }
+}

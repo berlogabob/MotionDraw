@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'camera_strip.dart';
 import 'feeds.dart';
+import 'web_feed_stub.dart' if (dart.library.js_interop) 'web_feed.dart';
 import 'motion_detector.dart';
 import 'sampler.dart';
 import 'scale_mapper.dart';
@@ -14,6 +17,8 @@ const cellsAcross = 12;
 const matte = 24.0;
 const ink = Colors.black;
 const _band = 10; // strip thickness in image pixels
+const captionReserve = 72.0; // three caption lines under the frame
+const _bpmSteps = [80, 100, 120, 140, 160];
 const captionStyle = TextStyle(fontSize: 11, letterSpacing: 1.0, color: ink);
 const _sensSteps = [0.5, 1.0, 2.0, 4.0];
 
@@ -127,6 +132,45 @@ class _CanvasScreenState extends State<CanvasScreen>
   ui.Image? _image;
   Geom? _geom;
   bool _settingsOpen = false;
+
+  // Tempo sync: detected notes wait for the next grid tick.
+  bool _tempo = false;
+  int _bpm = 120;
+  int _div = 8; // 4 | 8 | 16
+  Timer? _clock;
+  final _pending = <int, double>{}; // bin → intensity
+  int _pendingBins = 0;
+
+  void _restartClock() {
+    _clock?.cancel();
+    _clock = null;
+    if (!_tempo) return;
+    _clock = Timer.periodic(
+        Duration(milliseconds: tickMs(_bpm, _div)), (_) => _flush());
+  }
+
+  void _flush() {
+    if (_pending.isEmpty || !mounted) return;
+    final flash = List<double>.filled(_pendingBins, 0);
+    for (final e in _pending.entries) {
+      _play(e.key, e.value);
+      if (e.key < flash.length) flash[e.key] = 1;
+    }
+    _pending.clear();
+    _showFlash(flash);
+  }
+
+  void _play(int bin, double intensity) => widget.sampler.playNote(
+        binToMidi(bin, root: _settings.root, intervals: _settings.intervals),
+        sqrt(intensity),
+      );
+
+  void _showFlash(List<double> flash) {
+    _flash.value = flash;
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (mounted) _flash.value = List.filled(flash.length, 0);
+    });
+  }
   bool _busy = false;
   bool _decoding = false;
 
@@ -220,26 +264,26 @@ class _CanvasScreenState extends State<CanvasScreen>
   }
 
   void _fire(List<BinEvent> events, int bins) {
-    final flash = List.of(_flash.value);
+    final flash = List<double>.filled(bins, 0);
     for (final e in events) {
       // Strip index 0 = image top/left; bin 0 = low note = bottom/left.
       var bin = _vertical ? bins - 1 - e.bin : e.bin;
       if (_reversed) bin = bins - 1 - bin;
-      widget.sampler.playNote(
-        binToMidi(bin, root: _settings.root, intervals: _settings.intervals),
-        sqrt(e.intensity),
-      );
-      flash[bin] = 1;
       _lastIntensity.value = e.intensity;
+      if (_tempo) {
+        _pendingBins = bins;
+        _pending[bin] = max(_pending[bin] ?? 0, e.intensity);
+      } else {
+        _play(bin, e.intensity);
+        flash[bin] = 1;
+      }
     }
-    _flash.value = flash;
-    Future.delayed(const Duration(milliseconds: 250), () {
-      _flash.value = List.filled(bins, 0);
-    });
+    if (!_tempo) _showFlash(flash);
   }
 
   @override
   void dispose() {
+    _clock?.cancel();
     _head.dispose();
     _flash.dispose();
     _lastIntensity.dispose();
@@ -251,12 +295,16 @@ class _CanvasScreenState extends State<CanvasScreen>
 
   Widget _canvas() => LayoutBuilder(
         builder: (context, constraints) {
+          // The Stack spans the whole area so the caption below the frame is
+          // still inside it (hit-testing stops at the Stack's box); the frame
+          // itself is fitted into the area minus the caption reserve.
           final area = constraints.biggest;
+          final fitArea = Size(area.width, area.height - captionReserve);
           final g = _geom;
           // Before the first frame: an empty 4:3 frame in the same place.
           final dst = g == null
-              ? Geom.fit(area, 4, 3)
-              : Geom.fit(area, g.width, g.height);
+              ? Geom.fit(fitArea, 4, 3)
+              : Geom.fit(fitArea, g.width, g.height);
           final picture = GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanUpdate: (d) {
@@ -338,6 +386,35 @@ class _CanvasScreenState extends State<CanvasScreen>
                     : (_reversed ? 'right' : 'left'),
                 onTap: () => setState(() => _reversed = !_reversed)),
           ]),
+          _row([
+            captionRow('tempo', _tempo ? 'on' : 'off', onTap: () {
+              setState(() {
+                _tempo = !_tempo;
+                _restartClock();
+                if (!_tempo) _pending.clear();
+              });
+            }),
+            if (_tempo) ...[
+              captionRow('bpm', '$_bpm', onTap: () {
+                setState(() {
+                  final i = _bpmSteps.indexWhere((b) => b > _bpm);
+                  _bpm = i < 0 ? _bpmSteps.first : _bpmSteps[i];
+                  _restartClock();
+                });
+              }, onDrag: (dx) {
+                setState(() {
+                  _bpm = (_bpm + (dx / 2).round()).clamp(40, 240);
+                  _restartClock();
+                });
+              }),
+              captionRow('div', '1/$_div', onTap: () {
+                setState(() {
+                  _div = _div == 16 ? 4 : _div * 2;
+                  _restartClock();
+                });
+              }),
+            ],
+          ]),
         ],
       );
 
@@ -388,6 +465,8 @@ class _CanvasScreenState extends State<CanvasScreen>
                 builder: (context, v, _) =>
                     captionRow('last', '${(v * 100).round()}%'),
               ),
+              if (kIsWeb)
+                captionRow('fullscreen', '', onTap: toggleFullscreen),
               const SizedBox(height: 16),
               captionRow('close', '',
                   onTap: () => setState(() => _settingsOpen = false)),
@@ -414,9 +493,6 @@ class _CanvasScreenState extends State<CanvasScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: _canvas()),
-                  // Room for the two caption lines when the frame is as tall
-                  // as the area (landscape screens).
-                  const SizedBox(height: 56),
                 ],
               ),
             ),

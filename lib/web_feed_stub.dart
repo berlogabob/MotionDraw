@@ -17,3 +17,6 @@ class WebCameraFeed implements CameraFeed {
   Widget host(void Function(Frame) onFrame) =>
       throw UnsupportedError('web only');
 }
+
+/// Web only.
+void toggleFullscreen() {}

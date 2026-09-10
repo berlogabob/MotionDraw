@@ -19,3 +19,6 @@ int binToMidi(
     root + 12 * (bin ~/ intervals.length) + intervals[bin % intervals.length];
 
 double midiToFreq(int midi) => 440 * pow(2, (midi - 69) / 12).toDouble();
+
+/// Milliseconds per grid tick: [div] 4 = quarter, 8 = eighth, 16 = sixteenth.
+int tickMs(int bpm, int div) => (60000 / bpm / (div / 4)).round();

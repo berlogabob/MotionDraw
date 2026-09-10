@@ -51,4 +51,21 @@ void main() {
     await tester.pump();
     expect(find.textContaining('SCALE'), findsNothing);
   });
+
+  testWidgets('caption rows respond when the frame is height-limited',
+      (tester) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(MaterialApp(
+        home: CanvasScreen(sampler: Sampler(), feed: _FakeFeed())));
+    await tester.pump();
+    await tester.tap(find.textContaining('MODE'));
+    await tester.pump();
+    expect(find.textContaining('MODE   : STATIC'), findsOneWidget);
+    await tester.tap(find.textContaining('TEMPO'));
+    await tester.pump();
+    expect(find.textContaining('BPM    : 120'), findsOneWidget);
+    expect(find.textContaining('DIV    : 1/8'), findsOneWidget);
+  });
 }

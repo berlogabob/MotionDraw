@@ -29,4 +29,10 @@ void main() {
     expect(midiToFreq(81), closeTo(880, 1e-9));
     expect(midiToFreq(57), closeTo(220, 1e-9));
   });
+
+  test('tickMs', () {
+    expect(tickMs(120, 4), 500);
+    expect(tickMs(120, 8), 250);
+    expect(tickMs(90, 16), 167);
+  });
 }
