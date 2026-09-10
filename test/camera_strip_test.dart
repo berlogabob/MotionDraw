@@ -47,6 +47,6 @@ void main() {
 
   test('rgbaOf lifts grey and sets alpha', () {
     final px = rgbaOf(Gray(Uint8List.fromList([0, 255]), 2, 1));
-    expect(px, [145, 145, 145, 255, 255, 255, 255, 255]);
+    expect(px, [170, 170, 170, 255, 255, 255, 255, 255]);
   });
 }

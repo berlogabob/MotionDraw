@@ -2,8 +2,8 @@ import 'dart:math';
 
 /// Interval sets in semitones from the root.
 const scales = <String, List<int>>{
-  'pentatonic minor': [0, 3, 5, 7, 10],
-  'pentatonic major': [0, 2, 4, 7, 9],
+  'penta minor': [0, 3, 5, 7, 10],
+  'penta major': [0, 2, 4, 7, 9],
   'minor': [0, 2, 3, 5, 7, 8, 10],
   'major': [0, 2, 4, 5, 7, 9, 11],
   'blues': [0, 3, 5, 6, 7, 10],

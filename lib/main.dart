@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'canvas_screen.dart';
 import 'feeds.dart';
 import 'sampler.dart';
-import 'scale_mapper.dart';
 import 'web_feed_stub.dart' if (dart.library.js_interop) 'web_feed.dart';
 
 void main() async {
@@ -33,10 +32,10 @@ void main() async {
     theme: ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: Colors.white,
-      fontFamily: 'monospace',
+      fontFamily: 'IBM Plex Mono',
     ),
     home: feed == null
-        ? TapTestScreen(sampler: sampler)
+        ? Scaffold(body: Center(child: captionRow('camera', 'none')))
         : kIsWeb
             ? StartGate(sampler: sampler, feed: feed)
             : CanvasScreen(sampler: sampler, feed: feed),
@@ -44,6 +43,7 @@ void main() async {
 }
 
 /// Web only: one tap to unlock the browser's audio context, then the canvas.
+/// Drawn as the same screen: empty frame plus one caption row.
 class StartGate extends StatelessWidget {
   const StartGate({super.key, required this.sampler, required this.feed});
   final Sampler sampler;
@@ -58,80 +58,39 @@ class StartGate extends StatelessWidget {
           Navigator.of(context).pushReplacement(MaterialPageRoute(
               builder: (_) => CanvasScreen(sampler: sampler, feed: feed)));
         },
-        child: const Scaffold(
-          body: Center(
-            child: Text(
-              'TAP TO START',
-              style: TextStyle(
-                  fontSize: 11, letterSpacing: 1.5, color: Colors.black),
+        child: Scaffold(
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(matte),
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final area = Size(c.maxWidth, c.maxHeight - 32);
+                  final dst = Geom.fit(area, 4, 3);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CustomPaint(
+                        size: area,
+                        painter: FramePainter(
+                          image: null,
+                          geom: null,
+                          dst: dst,
+                          reversed: false,
+                          snap: true,
+                          pos: null,
+                          flash: const [],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Padding(
+                          padding: EdgeInsets.only(left: dst.left),
+                          child: captionRow('start', 'tap anywhere')),
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
       );
-}
-
-/// Milestone 1 test mode: tap anywhere — vertical position picks the note.
-/// Proves trigger latency and polyphony before any camera code exists.
-class TapTestScreen extends StatefulWidget {
-  const TapTestScreen({super.key, required this.sampler});
-  final Sampler sampler;
-
-  @override
-  State<TapTestScreen> createState() => _TapTestScreenState();
-}
-
-class _TapTestScreenState extends State<TapTestScreen> {
-  final _flash = List<double>.filled(cellsAcross, 0);
-
-  void _tap(TapDownDetails d, Size size) {
-    // Low notes at the bottom.
-    final bin =
-        ((1 - d.localPosition.dy / size.height) * cellsAcross).floor().clamp(0, cellsAcross - 1);
-    widget.sampler.playNote(binToMidi(bin), 0.8);
-    setState(() => _flash[bin] = 1);
-    Future.delayed(const Duration(milliseconds: 250), () {
-      if (mounted) setState(() => _flash[bin] = 0);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: LayoutBuilder(
-        builder: (context, constraints) => GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (d) => _tap(d, constraints.biggest),
-          child: CustomPaint(
-            size: constraints.biggest,
-            painter: _LinePainter(List.of(_flash)),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LinePainter extends CustomPainter {
-  _LinePainter(this.flash);
-  final List<double> flash;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final line = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 1;
-    final x = size.width / 2;
-    canvas.drawLine(Offset(x, 0), Offset(x, size.height), line);
-    final binH = size.height / cellsAcross;
-    for (var i = 0; i < cellsAcross; i++) {
-      final y = size.height - (i + 0.5) * binH;
-      canvas.drawLine(Offset(x - 4, y), Offset(x + 4, y), line);
-      if (flash[i] > 0) {
-        canvas.drawCircle(Offset(x, y), 8, Paint()..color = Colors.black);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_LinePainter old) => true;
 }

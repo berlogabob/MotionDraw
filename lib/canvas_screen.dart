@@ -11,10 +11,12 @@ import 'scale_mapper.dart';
 
 /// Cells across the shorter side of the camera image, on every device.
 const cellsAcross = 12;
-const _matte = 28.0;
-const _ink = Colors.black;
+const matte = 24.0;
+const ink = Colors.black;
 const _band = 10; // strip thickness in image pixels
-const _style = TextStyle(fontSize: 11, letterSpacing: 1.5, color: _ink);
+const captionStyle = TextStyle(fontSize: 11, letterSpacing: 1.0, color: ink);
+const _column = 160.0; // caption column width: two fit a phone, three a laptop
+const _sensSteps = [0.5, 1.0, 2.0, 4.0];
 
 const _roots = {
   'C': 48, 'C#': 49, 'D': 50, 'D#': 51, 'E': 52, 'F': 53, //
@@ -23,7 +25,7 @@ const _roots = {
 
 class Settings {
   double sensitivity = 1.0;
-  String scaleName = 'pentatonic minor';
+  String scaleName = 'penta minor';
   int root = 57; // A3
   List<int> get intervals => scales[scaleName]!;
   String get rootName =>
@@ -31,6 +33,10 @@ class Settings {
 
   void cycleScale() => scaleName = _next(scales.keys.toList(), scaleName);
   void cycleRoot() => root = _next(_roots.values.toList(), root);
+  void cycleSensitivity() {
+    final i = _sensSteps.indexWhere((s) => s > sensitivity + 1e-9);
+    sensitivity = i < 0 ? _sensSteps.first : _sensSteps[i];
+  }
 
   static T _next<T>(List<T> items, T current) =>
       items[(items.indexOf(current) + 1) % items.length];
@@ -57,22 +63,41 @@ class Geom {
   late final double start;
 
   /// Nearest grid line across the line axis, kept inside the image.
-  double snap(double px) => (across / 2 + ((px - across / 2) / cell).round() * cell)
-      .clamp(cell, across - cell)
-      .toDouble();
+  double snap(double px) =>
+      (across / 2 + ((px - across / 2) / cell).round() * cell)
+          .clamp(cell, across - cell)
+          .toDouble();
 
-  /// Where the image lands inside [area]: contain, centred.
+  /// Where the image lands inside [area]: contain, top-centred, so the
+  /// passepartout keeps equal sides and puts its weight at the bottom.
   static Rect fit(Size area, int w, int h) {
     final s = min(area.width / w, area.height / h);
-    final size = Size(w * s, h * s);
-    return Alignment.center.inscribe(size, Offset.zero & area);
+    return Alignment.topCenter.inscribe(Size(w * s, h * s), Offset.zero & area);
   }
+}
+
+/// A caption row: `LABEL : VALUE`, tap to cycle, optional horizontal drag.
+Widget captionRow(String label, String value,
+    {VoidCallback? onTap, void Function(double dx)? onDrag}) {
+  final text = Text(
+    '${label.toUpperCase().padRight(6)} : ${value.toUpperCase()}',
+    style: captionStyle,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+  );
+  if (onTap == null && onDrag == null) return text;
+  return GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    onHorizontalDragUpdate: onDrag == null ? null : (d) => onDrag(d.delta.dx),
+    child: text,
+  );
 }
 
 /// One screen: the analysed camera frame drawn inside an adaptive
 /// passepartout, a square grid anchored at the image centre, and a guide line
 /// whose position along the line picks the pitch. Drag = move line,
-/// double-tap = flip orientation. Caption rows and the ≡ menu are the controls.
+/// double-tap = flip orientation. Every control is a caption row.
 class CanvasScreen extends StatefulWidget {
   const CanvasScreen({super.key, required this.sampler, required this.feed});
   final Sampler sampler;
@@ -90,6 +115,7 @@ class _CanvasScreenState extends State<CanvasScreen>
   final _lastIntensity = ValueNotifier<double>(0);
   ui.Image? _image;
   Geom? _geom;
+  double _frameLeft = 0; // caption lines up with the frame's left edge
   bool _busy = false;
   bool _decoding = false;
 
@@ -121,6 +147,11 @@ class _CanvasScreenState extends State<CanvasScreen>
         _sweepSeconds = _sweepSeconds == 16 ? 4 : _sweepSeconds * 2;
         _head.duration = Duration(seconds: _sweepSeconds);
         if (_head.isAnimating) _head.repeat();
+      });
+
+  void _setSensitivity(double v) => setState(() {
+        _settings.sensitivity = v.clamp(0.25, 4.0);
+        _detector?.sensitivity = _settings.sensitivity;
       });
 
   Geom _geomFor(Gray g) {
@@ -209,154 +240,116 @@ class _CanvasScreenState extends State<CanvasScreen>
         builder: (context, constraints) {
           final area = constraints.biggest;
           final g = _geom;
-          final dst = g == null ? null : Geom.fit(area, g.width, g.height);
+          // Before the first frame: an empty 4:3 frame in the same place.
+          final dst = g == null
+              ? Geom.fit(area, 4, 3)
+              : Geom.fit(area, g.width, g.height);
+          if (dst.left != _frameLeft) {
+            // Layout-time value; the caption picks it up on the next build.
+            WidgetsBinding.instance.addPostFrameCallback(
+                (_) => mounted ? setState(() => _frameLeft = dst.left) : null);
+          }
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanUpdate: (d) {
-              if (g == null || dst == null) return;
+              if (g == null) return;
               final s = dst.width / g.width;
               final p = (d.localPosition - dst.topLeft) / s;
               setState(() => _pos = _vertical ? p.dx : p.dy);
             },
             onDoubleTap: () => setState(() => _vertical = !_vertical),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ValueListenableBuilder<List<double>>(
-                  valueListenable: _flash,
-                  builder: (context, flash, _) => CustomPaint(
-                    painter: FramePainter(
-                      image: _image,
-                      geom: g,
-                      dst: dst,
-                      reversed: _reversed,
-                      snap: !_head.isAnimating,
-                      pos: _pos,
-                      flash: flash,
-                    ),
-                  ),
+            child: ValueListenableBuilder<List<double>>(
+              valueListenable: _flash,
+              builder: (context, flash, _) => CustomPaint(
+                size: area,
+                painter: FramePainter(
+                  image: _image,
+                  geom: g,
+                  dst: dst,
+                  reversed: _reversed,
+                  snap: !_head.isAnimating,
+                  pos: _pos,
+                  flash: flash,
                 ),
-                if (dst != null)
-                  Positioned(
-                    left: dst.left + 4,
-                    top: dst.top + 16,
-                    bottom: area.height - dst.bottom + 16,
-                    width: 24,
-                    child: RotatedBox(quarterTurns: 3, child: _slider()),
-                  ),
-              ],
+              ),
             ),
           );
         },
       );
 
-  Widget _slider() => SliderTheme(
-        data: const SliderThemeData(
-          trackHeight: 1,
-          activeTrackColor: _ink,
-          inactiveTrackColor: _ink,
-          thumbColor: _ink,
-          overlayColor: Colors.transparent,
-          thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
-          overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
-          trackShape: RectangularSliderTrackShape(),
-        ),
-        child: Slider(
-          value: _settings.sensitivity,
-          min: 0.25,
-          max: 4,
-          onChanged: (v) => setState(() {
-            _settings.sensitivity = v;
-            _detector?.sensitivity = v;
-          }),
-        ),
-      );
+  List<Widget> _music() => [
+        captionRow('scale', _settings.scaleName,
+            onTap: () => setState(_settings.cycleScale)),
+        captionRow('root', _settings.rootName,
+            onTap: () => setState(_settings.cycleRoot)),
+        captionRow('synth', widget.sampler.instrumentName,
+            onTap: () => setState(widget.sampler.cycleInstrument)),
+        captionRow('sens', _settings.sensitivity.toStringAsFixed(2),
+            onTap: () => setState(_settings.cycleSensitivity),
+            onDrag: (dx) => _setSensitivity(_settings.sensitivity + dx / 100)),
+      ];
 
-  static Widget row(String label, String value, [VoidCallback? onTap]) {
-    // Fixed label column: the theme font is proportional on some platforms,
-    // so no padding trick would line the colons up.
-    final r = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(width: 64, child: Text(label.toUpperCase(), style: _style)),
-        Text(': ${value.toUpperCase()}', style: _style),
-      ],
-    );
-    return onTap == null
-        ? r
-        : GestureDetector(
-            behavior: HitTestBehavior.opaque, onTap: onTap, child: r);
-  }
-
-  Widget _caption() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          row('scale', _settings.scaleName, () => setState(_settings.cycleScale)),
-          row('root', _settings.rootName, () => setState(_settings.cycleRoot)),
-          row('line', _vertical ? 'vertical' : 'horizontal',
-              () => setState(() => _vertical = !_vertical)),
-          row(
-              'low',
-              _vertical
-                  ? (_reversed ? 'top' : 'bottom')
-                  : (_reversed ? 'right' : 'left'),
-              () => setState(() => _reversed = !_reversed)),
-          row('mode', _static ? 'static' : 'dynamic', () => setState(() {
-                _static = !_static;
-                if (!_static) _head.stop();
-              })),
-          if (_static) ...[
-            row('play', _head.isAnimating ? 'playing' : 'stopped', _togglePlay),
-            row('sweep', '${_sweepSeconds}s', _cycleSweep),
-          ],
-          row('sens', _settings.sensitivity.toStringAsFixed(2)),
+  List<Widget> _line() => [
+        captionRow('line', _vertical ? 'vertical' : 'horizontal',
+            onTap: () => setState(() => _vertical = !_vertical)),
+        captionRow(
+            'low',
+            _vertical
+                ? (_reversed ? 'top' : 'bottom')
+                : (_reversed ? 'right' : 'left'),
+            onTap: () => setState(() => _reversed = !_reversed)),
+        captionRow('mode', _static ? 'static' : 'dynamic', onTap: () {
+          setState(() {
+            _static = !_static;
+            if (!_static) _head.stop();
+          });
+        }),
+        if (_static) ...[
+          captionRow('play', _head.isAnimating ? 'playing' : 'stopped',
+              onTap: _togglePlay),
+          captionRow('sweep', '${_sweepSeconds}s', onTap: _cycleSweep),
         ],
-      );
+      ];
 
-  Widget _menu() {
+  List<Widget> _camera() {
     final feed = widget.feed;
     final cams = feed.cameras;
-    return PopupMenuButton<String>(
-      tooltip: '',
-      padding: EdgeInsets.zero,
-      color: Colors.white,
-      elevation: 0,
-      shape: const RoundedRectangleBorder(
-          side: BorderSide(color: _ink), borderRadius: BorderRadius.zero),
-      onSelected: (key) => setState(() {
-        switch (key) {
-          case 'camera':
-            feed.index = (feed.index + 1) % max(1, cams.length);
-          case 'fliph':
-            _flipH = !_flipH;
-          case 'flipv':
-            _flipV = !_flipV;
-          case 'synth':
-            widget.sampler.cycleInstrument();
-        }
-      }),
-      itemBuilder: (context) => [
-        PopupMenuItem(
-            value: 'camera',
-            child: row('camera', cams.isEmpty ? '-' : cams[feed.index])),
-        PopupMenuItem(value: 'fliph', child: row('flip h', _flipH ? 'on' : 'off')),
-        PopupMenuItem(value: 'flipv', child: row('flip v', _flipV ? 'on' : 'off')),
-        PopupMenuItem(
-            value: 'synth', child: row('synth', widget.sampler.instrumentName)),
-        PopupMenuItem(
-          enabled: false,
-          child: ValueListenableBuilder<double>(
-            valueListenable: _lastIntensity,
-            builder: (context, v, _) => row('last', '${(v * 100).round()}%'),
-          ),
-        ),
-      ],
-      child: const Padding(
-        padding: EdgeInsets.all(8),
-        child: Text('≡', style: TextStyle(fontSize: 22, color: _ink)),
+    return [
+      captionRow(
+          'camera',
+          _geom == null
+              ? 'waiting'
+              : cams.isEmpty
+                  ? '-'
+                  : cams[feed.index],
+          onTap: cams.length < 2
+              ? null
+              : () => setState(() => feed.index = (feed.index + 1) % cams.length)),
+      captionRow('flip h', _flipH ? 'on' : 'off',
+          onTap: () => setState(() => _flipH = !_flipH)),
+      captionRow('flip v', _flipV ? 'on' : 'off',
+          onTap: () => setState(() => _flipV = !_flipV)),
+      ValueListenableBuilder<double>(
+        valueListenable: _lastIntensity,
+        builder: (context, v, _) => captionRow('last', '${(v * 100).round()}%'),
       ),
-    );
+    ];
   }
+
+  Widget _caption() => Wrap(
+        spacing: 16,
+        runSpacing: 16,
+        children: [
+          for (final rows in [_music(), _line(), _camera()])
+            SizedBox(
+              width: _column,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: rows,
+              ),
+            ),
+        ],
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -368,23 +361,19 @@ class _CanvasScreenState extends State<CanvasScreen>
             KeyedSubtree(
                 key: ValueKey(widget.feed.index),
                 child: widget.feed.host(_onFrame)),
-            Column(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(_matte, _matte, _matte, 0),
-                    child: _canvas(),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(_matte, 16, _matte, 24),
-                  child: Align(
-                      alignment: Alignment.centerLeft, child: _caption()),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(matte, matte, matte, matte),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _canvas()),
+                  const SizedBox(height: 16),
+                  Padding(
+                      padding: EdgeInsets.only(left: _frameLeft),
+                      child: _caption()),
+                ],
+              ),
             ),
-            Positioned(top: 0, right: 8, child: _menu()),
           ],
         ),
       ),
@@ -392,9 +381,9 @@ class _CanvasScreenState extends State<CanvasScreen>
   }
 }
 
-/// Draws, in image-pixel space: the frame, the centred grid, the guide line
-/// with ticks on the crossings, and the flashed cell after the line. The
-/// passepartout is whatever the image does not cover.
+/// Draws, in image-pixel space: the frame, the centred grid, the guide line,
+/// and the flashed cell after the line. The passepartout is whatever the
+/// image does not cover.
 class FramePainter extends CustomPainter {
   FramePainter({
     required this.image,
@@ -407,7 +396,7 @@ class FramePainter extends CustomPainter {
   });
   final ui.Image? image;
   final Geom? geom;
-  final Rect? dst;
+  final Rect dst;
   final bool reversed;
   final bool snap; // grid-snapped when idle, continuous as a playhead
   final double? pos;
@@ -415,39 +404,37 @@ class FramePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final border = Paint()
+      ..color = ink
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
     final g = geom;
-    final d = dst;
-    if (g == null || d == null) {
-      // No frame yet: an empty frame in the middle of the matte.
-      canvas.drawRect(
-          (Offset.zero & size).deflate(0.5),
-          Paint()
-            ..color = _ink
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1);
+    if (g == null) {
+      canvas.drawRect(dst.deflate(0.5), border);
       return;
     }
-    final s = d.width / g.width;
+    final s = dst.width / g.width;
     canvas.save();
-    canvas.clipRect(d);
-    canvas.translate(d.left, d.top);
+    canvas.clipRect(dst);
+    canvas.translate(dst.left, dst.top);
     canvas.scale(s);
     final w = g.width.toDouble(), h = g.height.toDouble();
     final px = 1 / s; // one screen pixel
     if (image != null) {
       canvas.drawImageRect(
           image!,
-          Rect.fromLTWH(0, 0, image!.width.toDouble(), image!.height.toDouble()),
+          Rect.fromLTWH(
+              0, 0, image!.width.toDouble(), image!.height.toDouble()),
           Rect.fromLTWH(0, 0, w, h),
           Paint()..filterQuality = FilterQuality.low);
     }
     final grid = Paint()
-      ..color = _ink.withValues(alpha: 0.28)
+      ..color = ink.withValues(alpha: 0.16)
       ..strokeWidth = px;
-    final ink = Paint()
-      ..color = _ink
-      ..strokeWidth = px;
-    final fill = Paint()..color = _ink;
+    final line = Paint()
+      ..color = ink
+      ..strokeWidth = 2 * px;
+    final fill = Paint()..color = ink;
 
     for (var x = w / 2 % g.cell; x <= w; x += g.cell) {
       canvas.drawLine(Offset(x, 0), Offset(x, h), grid);
@@ -460,15 +447,11 @@ class FramePainter extends CustomPainter {
     Offset pt(double a, double c) => g.vertical ? Offset(c, a) : Offset(a, c);
     final raw = pos ?? g.across / 2;
     final lineC = snap ? g.snap(raw) : raw.clamp(0.0, g.across);
-    canvas.drawLine(pt(0, lineC), pt(g.along, lineC), ink);
-    for (var k = 0; k <= g.bins; k++) {
-      final a = g.start + k * g.cell;
-      canvas.drawLine(pt(a, lineC - 4 * px), pt(a, lineC + 4 * px), ink);
-    }
+    canvas.drawLine(pt(0, lineC), pt(g.along, lineC), line);
     final n = min(flash.length, g.bins);
     for (var i = 0; i < n; i++) {
       if (flash[i] <= 0) continue;
-      var b = reversed ? n - 1 - i : i;
+      final b = reversed ? n - 1 - i : i;
       final slot = g.vertical ? n - 1 - b : b; // strip index from top/left
       final a0 = g.start + slot * g.cell;
       canvas.drawRect(
@@ -476,12 +459,7 @@ class FramePainter extends CustomPainter {
           fill);
     }
     canvas.restore();
-    canvas.drawRect(
-        d.deflate(0.5),
-        Paint()
-          ..color = _ink
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1);
+    canvas.drawRect(dst.deflate(0.5), border);
   }
 
   @override

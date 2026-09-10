@@ -96,7 +96,7 @@ Uint8List stripOf(
 }
 
 /// Display pixels: grey lifted towards white so black ink reads on top.
-Uint8List rgbaOf(Gray g, {double gain = 0.45, double lift = 145}) {
+Uint8List rgbaOf(Gray g, {double gain = 0.35, double lift = 170}) {
   final out = Uint8List(g.width * g.height * 4);
   for (var i = 0, o = 0; i < g.bytes.length; i++, o += 4) {
     final v = (g.bytes[i] * gain + lift).round().clamp(0, 255);

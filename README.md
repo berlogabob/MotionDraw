@@ -20,25 +20,26 @@ short side.
 
 ## Controls
 
-Everything is in the caption under the frame. Tap a row to change it.
+Everything is a caption row under the frame. Tap a row to change it. Nothing
+is hidden in a menu.
 
-| Row     | Values                                  |
-| ------- | --------------------------------------- |
-| SCALE   | pentatonic minor/major, minor, major, blues, chromatic |
-| ROOT    | C … B                                   |
-| LINE    | vertical / horizontal                   |
-| LOW     | bottom/top or left/right — pitch direction, also sweep direction |
-| MODE    | dynamic / static                        |
-| PLAY    | stopped / playing (static only)         |
-| SWEEP   | 4s / 8s / 16s per pass (static only)    |
-| SENS    | sensitivity, set with the slider inside the frame |
+| Column | Row    | Values                                  |
+| ------ | ------ | --------------------------------------- |
+| music  | SCALE  | penta minor/major, minor, major, blues, chromatic |
+|        | ROOT   | C … B                                   |
+|        | SYNTH  | sine, triangle, saw, square, supersaw   |
+|        | SENS   | tap: 0.5 / 1 / 2 / 4; drag sideways for fine control |
+| line   | LINE   | vertical / horizontal                   |
+|        | LOW    | bottom/top or left/right — pitch direction, also sweep direction |
+|        | MODE   | dynamic / static                        |
+|        | PLAY   | stopped / playing (static only)         |
+|        | SWEEP  | 4s / 8s / 16s per pass (static only)    |
+| camera | CAMERA | cycle devices: front/rear, USB, browser inputs |
+|        | FLIP H | mirror picture and detection together   |
+|        | FLIP V |                                         |
+|        | LAST   | intensity of the last trigger           |
 
 Drag inside the frame to move the line. Double-tap flips its orientation.
-
-The ≡ menu (top right): CAMERA (cycle devices: front/rear, USB, browser
-inputs), FLIP H, FLIP V (mirror the picture and detection together), SYNTH
-(sine, triangle, saw, square, supersaw), LAST (intensity of the last
-trigger).
 
 ## Run
 
